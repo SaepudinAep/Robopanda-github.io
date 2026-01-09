@@ -1,120 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Robopanda Robotic & Coding</title>
+  <!-- Google Fonts & Icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Roboto&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
   <style>
-    /* RESET */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
     body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      background-color: #0f0f0f;
-      color: #eeeeee;
-      line-height: 1.6;
+      margin: 0;
+      font-family: 'Roboto', sans-serif;
+      background: #fefefe;
+      color: #333;
     }
 
-    header {
+    /* NAVBAR */
+    nav {
+      background: #ffab19; /* Scratch orange */
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    nav h1 {
+      font-family: 'Fredoka One', cursive;
+      color: #fff;
+      margin: 0;
+    }
+    nav a {
+      background: #4d97ff;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 20px;
+      text-decoration: none;
+      font-weight: bold;
+      transition: 0.3s;
+    }
+    nav a:hover {
+      background: #ff661a;
+    }
+
+    /* HERO */
+    .hero {
       text-align: center;
-      padding: 80px 20px 60px;
+      padding: 80px 20px;
+      background: linear-gradient(135deg, #4d97ff, #ffab19);
+      color: #fff;
+    }
+    .hero h1 {
+      font-family: 'Fredoka One', cursive;
+      font-size: 3em;
+      margin-bottom: 10px;
+    }
+    .hero h2 {
+      font-size: 1.5em;
+      margin-bottom: 20px;
+    }
+    .hero .btn {
+      background: #ffab19;
+      color: #fff;
+      padding: 12px 25px;
+      border-radius: 25px;
+      text-decoration: none;
+      font-weight: bold;
+      transition: 0.3s;
+    }
+    .hero .btn:hover {
+      background: #4d97ff;
     }
 
-    header h1 {
-      font-size: 3rem;
-      font-weight: 600;
-      letter-spacing: 1px;
+    /* SECTIONS */
+    .section {
+      padding: 50px 20px;
+      max-width: 900px;
+      margin: auto;
     }
-
-    header p {
-      margin-top: 12px;
-      font-size: 1.1rem;
-      color: #b5b5b5;
+    .section h3 {
+      font-family: 'Fredoka One', cursive;
+      color: #4d97ff;
+      margin-bottom: 20px;
     }
-
-    main {
-      max-width: 820px;
-      margin: 0 auto;
-      padding: 0 20px 60px;
+    .focus {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
     }
-
-    section {
-      margin-bottom: 48px;
-    }
-
-    section h2 {
-      font-size: 1.4rem;
-      margin-bottom: 12px;
-      border-left: 4px solid #e53935;
-      padding-left: 12px;
-    }
-
-    section p {
-      color: #d0d0d0;
-    }
-
-    ul {
-      padding-left: 20px;
-    }
-
-    li {
-      margin-bottom: 8px;
-      color: #d0d0d0;
-    }
-
-    footer {
+    .item {
+      flex: 1;
+      min-width: 250px;
+      background: #fff3d6;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
       text-align: center;
-      padding: 32px 20px;
-      font-size: 0.9rem;
-      color: #8a8a8a;
+    }
+    .item strong {
+      display: block;
+      margin-bottom: 10px;
+      color: #ff661a;
+    }
+    .item i {
+      font-size: 2em;
+      margin-bottom: 10px;
+      color: #4d97ff;
+    }
+
+    /* FOOTER */
+    .footer {
+      background: #4d97ff;
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+    }
+    .footer a {
+      color: #ffab19;
+      margin: 0 10px;
+      text-decoration: none;
     }
   </style>
 </head>
-
 <body>
 
-  <header>
+  <!-- NAVBAR -->
+  <nav>
     <h1>Robopanda</h1>
-    <p>Robotic & Coding Education</p>
+    <a href="learning.html"><i class="fas fa-graduation-cap"></i> Learning</a>
+  </nav>
+
+  <!-- HERO -->
+  <header class="hero">
+    <h1>Robopanda Robotic & Coding</h1>
+    <h2>Robotics, coding, and creative learning</h2>
+    <p class="tagline">
+      An early-stage learning platform for robotics and coding.
+    </p>
+    <a href="learning.html" class="btn"><i class="fas fa-play"></i> Start Learning</a>
   </header>
 
-  <main>
-    <section>
-      <h2>About Robopanda</h2>
-      <p>
-        Robopanda is a learning initiative focused on robotics and coding,
-        designed to build strong logical thinking, structured problem-solving,
-        and fundamental understanding of technology.
-      </p>
-    </section>
+  <!-- INTRO -->
+  <section id="intro" class="section">
+    <h3>Who We Are</h3>
+    <p>
+      Robopanda Robotic & Coding is a learning platform focused on introducing
+      robotics and coding through logic, creativity, and play.
+    </p>
+    <p>
+      We believe that understanding systems should start simple —
+      through exploration, experimentation, and meaningful projects.
+    </p>
+  </section>
 
-    <section>
-      <h2>Learning Focus</h2>
-      <ul>
-        <li>Programming logic fundamentals</li>
-        <li>Visual and text-based coding</li>
-        <li>Beginner robotics and IoT</li>
-        <li>Problem solving & computational thinking</li>
-      </ul>
-    </section>
+  <!-- FOCUS -->
+  <section id="focus" class="section">
+    <h3>What We Teach</h3>
+    <div class="focus">
+      <div class="item">
+        <i class="fas fa-brain"></i>
+        <strong>Logical Thinking</strong>
+        <p>Problem-solving through games, puzzles, and structured challenges.</p>
+      </div>
+      <div class="item">
+        <i class="fas fa-code"></i>
+        <strong>Coding Fundamentals</strong>
+        <p>From Scratch-based projects to basic programming concepts.</p>
+      </div>
+      <div class="item">
+        <i class="fas fa-robot"></i>
+        <strong>Robotics Concepts</strong>
+        <p>Understanding how software interacts with real-world systems.</p>
+      </div>
+    </div>
+  </section>
 
-    <section>
-      <h2>Roadmap</h2>
-      <p>
-        Learning materials will be released gradually,
-        with a minimum of <strong>one new topic per week</strong>.
-        This page serves as the foundation before expanding into a full learning platform.
-      </p>
-    </section>
-  </main>
+  <!-- DIRECTION -->
+  <section id="direction" class="section">
+    <h3>Our Direction</h3>
+    <p>
+      This platform is designed to grow step by step.
+      Starting from basic learning materials, it will gradually evolve
+      into a structured space for robotics and coding education.
+    </p>
+  </section>
 
-  <footer>
-    © 2026 Robopanda Robotic & Coding
+  <!-- FOOTER -->
+  <footer class="footer">
+    <p>© 2026 Robopanda Robotic & Coding</p>
+    <p>
+      <a href="#"><i class="fab fa-instagram"></i></a>
+      <a href="#"><i class="fab fa-youtube"></i></a>
+      <a href="mailto:info@robopanda.com"><i class="fas fa-envelope"></i></a>
+    </p>
   </footer>
 
 </body>
