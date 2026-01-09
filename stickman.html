@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stickman Adventure - Robopanda Scratch Learning</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Roboto&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { margin:0; font-family:'Roboto',sans-serif; background:#fff3d6; color:#1e293b; line-height:1.7; }
+    .navbar { background:#ffab19; padding:10px 20px; display:flex; justify-content:space-between; align-items:center; }
+    .navbar h1 { font-family:'Fredoka One',cursive; color:#fff; margin:0; }
+    .nav-links a { background:#4d97ff; color:#fff; padding:8px 16px; border-radius:20px; text-decoration:none; font-weight:bold; margin-left:10px; transition:0.3s; }
+    .nav-links a:hover { background:#ff661a; }
+    header { text-align:center; padding:60px 20px; background:linear-gradient(135deg,#4d97ff,#ffab19); color:#fff; }
+    header h2 { font-family:'Fredoka One',cursive; font-size:2.2rem; margin:0; }
+    .container { max-width:900px; margin:auto; padding:40px 20px; }
+    .session-card { background:#fff; border-radius:15px; padding:30px; margin-bottom:30px; box-shadow:0 6px 10px rgba(0,0,0,0.1); border-left:6px solid #ffab19; }
+    .badge { display:inline-block; background:#4d97ff; color:#fff; padding:4px 12px; border-radius:99px; font-size:0.8rem; font-weight:bold; text-transform:uppercase; margin-bottom:15px; }
+    h2 { font-family:'Fredoka One',cursive; color:#ff661a; margin-top:0; }
+    .section-title { font-weight:bold; margin:20px 0 10px 0; color:#4d97ff; }
+    .story-content { background:#fffbe6; border-left:5px solid #ffab19; padding:15px; border-radius:8px; font-style:italic; }
+    .logic-grid { display:grid; grid-template-columns:1fr 1fr; gap:15px; margin:20px 0; }
+    .logic-item { background:#f1f5f9; padding:12px; border-radius:10px; border:1px solid #cbd5e1; }
+    .code-window { background:#1e1e1e; color:#dcdcdc; padding:15px; border-radius:10px; font-family:'Fira Code',monospace; margin-top:10px; border-top:25px solid #333; position:relative; }
+    .code-window::before { content:"•••"; position:absolute; top:-20px; left:15px; color:#ff5f56; letter-spacing:5px; font-size:18px; }
+    .instruction { color:#4d97ff; font-weight:bold; }
+    .variable { color:#ffab19; font-weight:bold; }
+    .challenge { background:#e0f2fe; padding:15px; border-radius:10px; margin-top:15px; }
+    img { max-width:100%; border-radius:10px; margin:15px 0; }
+    footer { background:#4d97ff; color:#fff; text-align:center; padding:20px; margin-top:40px; }
+    footer a { color:#ffab19; margin:0 8px; text-decoration:none; }
+    @media(max-width:600px){ .logic-grid{grid-template-columns:1fr;} header h2{font-size:1.8rem;} }
+  </style>
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <nav class="navbar">
+    <h1>Robopanda</h1>
+    <div class="nav-links">
+      <a href="index.html"><i class="fas fa-home"></i> Home</a>
+      <a href="learning.html"><i class="fas fa-graduation-cap"></i> Learning</a>
+    </div>
+  </nav>
+
+  <!-- HEADER -->
+  <header>
+    <h2>Stickman Adventure</h2>
+    <p>Modul Pembelajaran Mandiri - Robopanda Scratch Learning</p>
+  </header>
+
+  <div class="container">
+
+    <!-- Sinopsis -->
+    <div class="session-card">
+      <h2>📖 Sinopsis Cerita</h2>
+      <div class="story-content">
+        "Stickman harus mengejar pencuri emas melintasi dunia garis. Ia dibekali pedang pusaka yang muncul saat dibutuhkan. Tantangannya: dunia terus bergerak, platform bergeser, musuh menjaga wilayah, dan Stickman harus bertahan sambil mengumpulkan skor."
+      </div>
+      <img src="images/stickman-adventure.png" alt="Ilustrasi Stickman Adventure">
+    </div>
+
+    <!-- Sesi 1 -->
+    <div class="session-card">
+      <span class="badge">Sesi 1</span>
+      <h2>Gerakan Dasar & Logika Scrolling</h2>
+      <p><strong>Tujuan:</strong> Membuat Stickman bergerak halus dengan kamera mengikuti pergerakan.</p>
+      <div class="section-title">📍 Alur Cerita</div>
+      <p>Stickman mulai berlari. Kamera harus bergeser mengikuti langkahnya agar dunia terasa luas.</p>
+      <div class="logic-grid">
+        <div class="logic-item"><strong>Sebab:</strong> Pemain menekan tombol 'Kanan'.</div>
+        <div class="logic-item"><strong>Akibat:</strong> Variabel <span class="variable">Scroll_X</span> meningkat, latar belakang bergeser ke kiri.</div>
+      </div>
+      <div class="section-title">💻 Susunan Blok</div>
+      <div class="code-window">
+        KETIKA sprite tombol diklik → ULANGI SAMPAI tidak diklik → UBAH [Kecepatan_X] sebesar (1.5)<br><br>
+        SELAMANYA → UBAH [Scroll_X] sebesar (Kecepatan_X) → ATUR [Kecepatan_X] ke (Kecepatan_X*0.8) → PERGI KE x:(0) y:(-50)
+      </div>
+      <div class="challenge">💡 Challenge: Tambahkan tombol 'Kiri' agar Stickman bisa bergerak dua arah.</div>
+    </div>
+
+    <!-- Sesi 2 -->
+    <div class="session-card">
+      <span class="badge">Sesi 2</span>
+      <h2>Desain Platform & Sistem Multi-Level</h2>
+      <p><strong>Tujuan:</strong> Membuat Stickman bisa melompat dan berpindah level.</p>
+      <div class="section-title">📍 Alur Cerita</div>
+      <p>Stickman menghadapi jurang. Ia harus melompat ke platform berikutnya. Saat mencapai ujung, level berganti.</p>
+      <div class="logic-grid">
+        <div class="logic-item"><strong>Sebab:</strong> Pemain menekan tombol 'Lompat'.</div>
+        <div class="logic-item"><strong>Akibat:</strong> Stickman naik lalu turun karena gravitasi. Backdrop berganti saat mencapai ujung.</div>
+      </div>
+      <div class="section-title">💻 Susunan Blok</div>
+      <div class="code-window">
+        KETIKA tombol Lompat ditekan → UBAH [Kecepatan_Y] menjadi (10)<br><br>
+        SELAMANYA → UBAH y sebesar (Kecepatan_Y) → UBAH [Kecepatan_Y] sebesar (-0.5) // Gravitasi<br>
+        JIKA menyentuh [Platform] → ATUR [Kecepatan_Y] ke (0)<br>
+        JIKA x > batas level → Ganti backdrop ke Level berikutnya
+      </div>
+      <div class="challenge">💡 Challenge
+<!-- Sesi 3 -->
+    <div class="session-card">
+      <span class="badge">Sesi 3</span>
+      <h2>Mekanik Animasi & Attachment Pedang</h2>
+      <p><strong>Tujuan:</strong> Membuat pedang selalu menempel di tangan Stickman dan bisa beranimasi saat menyerang.</p>
+
+      <div class="section-title">📍 Alur Cerita</div>
+      <p>Stickman mengeluarkan pedang pusaka. Pedang ini harus selalu mengikuti arah Stickman, baik saat berlari maupun melompat.</p>
+
+      <img src="images/stickman-sword.png" alt="Stickman membawa pedang">
+
+      <div class="logic-grid">
+        <div class="logic-item"><strong>Sebab:</strong> Pemain menekan tombol 'Serang'.</div>
+        <div class="logic-item"><strong>Akibat:</strong> Broadcast pesan dikirim → pedang tampil dan beranimasi.</div>
+      </div>
+
+      <div class="section-title">💻 Susunan Blok</div>
+      <div class="code-window">
+        KETIKA sprite tombol Serang diklik → SIARKAN [Serang]<br><br>
+        SELAMANYA → PERGI KE [Stickman] → JIKA arah Stickman=90 → Ubah x(+15) → Jika tidak → Ubah x(-15)<br><br>
+        KETIKA aku menerima [Serang] → Tampilkan → Ganti kostum ke [ayun_1] → Tunggu(0.05) → Ganti kostum [ayun_2] → Tunggu(0.1) → Sembunyikan
+      </div>
+
+      <div class="challenge">💡 Challenge: Tambahkan efek suara "slash" saat pedang diayunkan.</div>
+    </div>
+
+    <!-- Sesi 4 -->
+    <div class="session-card">
+      <span class="badge">Sesi 4</span>
+      <h2>Implementasi Musuh & Batas Wilayah (Patroli)</h2>
+      <p><strong>Tujuan:</strong> Membuat musuh muncul dan bergerak bolak-balik dalam area tertentu.</p>
+
+      <div class="section-title">📍 Alur Cerita</div>
+      <p>Stickman bertemu musuh yang menjaga wilayah. Musuh hanya berpatroli di area tertentu, bolak-balik tanpa keluar batas.</p>
+
+      <img src="images/stickman-enemy.png" alt="Stickman menghadapi musuh">
+
+      <div class="logic-grid">
+        <div class="logic-item"><strong>Sebab:</strong> Musuh mencapai batas koordinat.</div>
+        <div class="logic-item"><strong>Akibat:</strong> Musuh berbalik arah dan terus berpatroli.</div>
+      </div>
+
+      <div class="section-title">💻 Susunan Blok</div>
+      <div class="code-window">
+        SELAMANYA → Gerak maju (5 langkah)<br>
+        JIKA x > batas kanan → Ubah arah(-90)<br>
+        JIKA x < batas kiri → Ubah arah(90)
+      </div>
+
+      <div class="challenge">💡 Challenge: Tambahkan animasi musuh saat berbalik arah.</div>
+    </div>
+
+    <!-- Sesi 5 -->
+    <div class="session-card">
+      <span class="badge">Sesi 5</span>
+      <h2>Sistem Skor & Kalkulasi Bonus</h2>
+      <p><strong>Tujuan:</strong> Memberikan skor saat Stickman mengalahkan musuh dan bonus di level tertentu.</p>
+
+      <div class="section-title">📍 Alur Cerita</div>
+      <p>Stickman mendapat poin setiap kali pedangnya mengenai musuh. Bonus diberikan setiap kali mencapai kelipatan tertentu.</p>
+
+      <img src="images/stickman-score.png" alt="Stickman mendapatkan skor">
+
+      <div class="logic-grid">
+        <div class="logic-item"><strong>Sebab:</strong> Pedang mengenai musuh.</div>
+        <div class="logic-item"><strong>Akibat:</strong> Variabel <span class="variable">Skor</span> bertambah, musuh hilang.</div>
+      </div>
+
+      <div class="section-title">💻 Susunan Blok</div>
+      <div class="code-window">
+        KETIKA pedang menyentuh musuh → Tambah [Skor] sebesar (10) → Sembunyikan musuh<br>
+        JIKA [Skor] mod 50 = 0 → Tambah bonus kecepatan 2.5% pada [Kecepatan_X]
+      </div>
+
+      <div class="challenge">💡 Challenge: Tambahkan papan skor di layar agar pemain bisa melihat poin secara real-time.</div>
+    </div>
