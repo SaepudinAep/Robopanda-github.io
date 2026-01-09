@@ -9,7 +9,8 @@
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont,
                "Segoe UI", Roboto, sans-serif;
-  background-color: #ffffff;
+  
+  background: purple !important;
   color: #111;
   line-height: 1.6;
 }
