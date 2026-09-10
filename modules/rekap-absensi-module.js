@@ -1,7 +1,7 @@
 /**
  * Project: Robopanda Client (Public/Student)
  * File: modules/rekap-absensi-module.js
- * Version: 2.5 - Private = gabungan per GROUP (semua kelas group digabungan)
+ * Version: 2.6 - Tab Absensi jadi tabel vertikal (No | Tanggal | Nama | Materi | Status)
  *
  * Description:
  *  Laporan absensi & materi/silabus terajarkan per kelas, mengikuti
@@ -1008,87 +1008,93 @@ function buildPeriodGroups(sessions) {
 // ---------------------------------------------------------------
 // 5. TAB ABSENSI (Dengan Baris Total Hadir di Footer)
 // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// 5. TAB ABSENSI (Tabel Vertikal: No | Tanggal | Nama | Materi | Status)
+//    — ke bawah, bukan matriks siswa × sesi.
+// ---------------------------------------------------------------
 function renderAbsensiWorksheet() {
     const table = document.getElementById('rk-table-absensi');
     const sessions = getRangePertemuanList();
-    const totalStudents = app.students.length;
+    const sessionIds = new Set(sessions.map(s => s.id));
 
-    if (!sessions.length || !totalStudents) {
+    // Gabungkan data absensi dengan info sesi (tanggal, materi) & siswa (nama)
+    const byPertemuan = new Map(app.pertemuanList.map(p => [p.id, p]));
+    const byStudent = new Map(app.students.map(s => [s.id, s]));
+
+    const rows = app.attendance
+        .filter(r => sessionIds.has(r.pertemuan_id))
+        .map(r => ({
+            ...r,
+            tanggal: byPertemuan.get(r.pertemuan_id)?.tanggal || '',
+            judul: byPertemuan.get(r.pertemuan_id)?.judul || '(tanpa judul)',
+            sessionClassName: byPertemuan.get(r.pertemuan_id)?.className || '',
+            studentName: r.student?.name || byStudent.get(r.student_id)?.name || '',
+            studentClassName: r.className || byStudent.get(r.student_id)?.className || ''
+        }))
+        .sort((a, b) =>
+            String(b.tanggal || '').localeCompare(String(a.tanggal || '')) ||
+            String(a.studentName).localeCompare(String(b.studentName)));
+
+    if (!rows.length) {
         table.innerHTML = `<thead><tr><th>Absensi</th></tr></thead>
             <tbody><tr><td class="rk-empty">Belum ada data absensi untuk kelas/rentang ini.</td></tr></tbody>`;
         return;
     }
 
-    // Peta (student_id|pertemuan_id) -> record
-    const byKey = new Map();
-    app.attendance.forEach(r => byKey.set(r.student_id + '|' + r.pertemuan_id, r));
-
-    // Hitung total hadir per kolom pertemuan
-    const presentPerSession = sessions.map(s => {
-        let count = 0;
-        app.students.forEach(st => {
-            const rec = byKey.get(st.id + '|' + s.id);
-            if (rec && String(rec.status) === '1') {
-                count++;
-            }
-        });
-        return count;
-    });
-
-    // [BILLING CYCLE] Baris header pengelompokan per siklus (hanya jika ada data periode & >1 kelompok)
+    // [BILLING CYCLE] Grup baris per siklus (label "Siklus N (n sesi)") bila ada periode
     const hasPeriods = app.periods.length > 0;
-    const groups = buildPeriodGroups(sessions);
-    const groupRow = (hasPeriods && groups.length > 1)
-        ? `<tr class="rk-cycle-group">
-            <th class="rk-sticky rk-col-no"></th>
-            <th class="rk-sticky rk-col-name"></th>
-            <th class="rk-sticky rk-col-grade"></th>
-            ${groups.map(g => `<th class="rk-cycle-cell" colspan="${Math.max(g.count, 1)}">${escapeHtml(g.label)}</th>`).join('')}
-        </tr>`
-        : '';
+    const groups = [];
+    rows.forEach(r => {
+        const pi = app.periodMap[r.pertemuan_id] ?? -1;
+        const key = pi < 0 ? 'x' : String(pi);
+        const last = groups[groups.length - 1];
+        if (last && last.key === key) {
+            last.rows.push(r);
+            last.count++;
+        } else {
+            groups.push({ key, pi, label: pi < 0 ? 'Tanpa Siklus' : periodLabel(pi), count: 1, rows: [r] });
+        }
+    });
+    groups.forEach(g => { if (g.pi >= 0) g.label = periodLabel(g.pi, g.count); });
 
-    const thead = `<thead>${groupRow}<tr>
-        <th class="rk-sticky rk-col-no" width="40">No</th>
-        <th class="rk-sticky rk-col-name rk-left">Nama Siswa</th>
-        <th class="rk-sticky rk-col-grade rk-left">Grade</th>
-        ${sessions.map((s, idx) =>
-            `<th class="rk-session-header" title="${escapeHtml(fmtDateLong(s.tanggal))} • ${escapeHtml(s.judul)}">
-                <span class="rk-session-num">Sesi ${idx + 1}</span>
-                <span class="rk-session-date">${escapeHtml(fmtDate(s.tanggal))}</span>
-            </th>`
-        ).join('')}
-    </tr></thead>`;
-
-    const tbody = `<tbody>` + app.students.map((st, i) => {
-        const cells = sessions.map(s => {
-            const rec = byKey.get(st.id + '|' + s.id);
-            return `<td class="rk-center">${ikonAbsensi(rec?.status)}</td>`;
+    let no = 0;
+    let present = 0;
+    const bodyRows = groups.map(g => {
+        const hdr = hasPeriods
+            ? `<tr class="rk-cycle-hdr"><td colspan="5">${escapeHtml(g.label)}</td></tr>`
+            : '';
+        return hdr + g.rows.map(r => {
+            no++;
+            if (String(r.status) === '1') present++;
+            return `<tr>
+                <td class="rk-center"><strong>${no}</strong></td>
+                <td class="rk-left" style="white-space:nowrap;">${escapeHtml(fmtDateLong(r.tanggal))}</td>
+                <td class="rk-left">${escapeHtml(r.studentName)}${app.activeCtx === 'private' && r.studentClassName ? `<span class="rk-class-tag">${escapeHtml(r.studentClassName)}</span>` : ''}</td>
+                <td class="rk-left">${escapeHtml(r.judul)}${app.activeCtx === 'private' && r.sessionClassName ? `<span class="rk-class-tag">${escapeHtml(r.sessionClassName)}</span>` : ''}</td>
+                <td class="rk-center">${ikonAbsensi(r.status)}</td>
+            </tr>`;
         }).join('');
-        return `<tr>
-            <td class="rk-sticky rk-col-no">${i + 1}</td>
-            <td class="rk-sticky rk-col-name rk-left">${escapeHtml(st.name)}${app.activeCtx === 'private' && st.className ? `<span class="rk-class-tag">${escapeHtml(st.className)}</span>` : ''}</td>
-            <td class="rk-sticky rk-col-grade rk-left">${escapeHtml(st.grade || '-')}</td>
-            ${cells}
-        </tr>`;
-    }).join('') + `</tbody>`;
+    }).join('');
 
-    // [BARIS TOTAL SISWA HADIR DI FOOTER]
+    const pct = rows.length > 0 ? Math.round((present / rows.length) * 100) : 0;
     const tfoot = `<tfoot>
         <tr class="rk-foot-total">
-            <td class="rk-sticky rk-col-no"><i class="fa-solid fa-check-double"></i></td>
-            <td class="rk-sticky rk-col-name rk-left"><strong>Total Hadir (✅)</strong></td>
-            <td class="rk-sticky rk-col-grade rk-left"><strong>${totalStudents} Siswa</strong></td>
-            ${presentPerSession.map(hadir => {
-                const pct = totalStudents > 0 ? Math.round((hadir / totalStudents) * 100) : 0;
-                return `<td class="rk-center rk-cell-total">
-                    <div class="rk-total-val">${hadir}</div>
-                    <div class="rk-total-pct">${pct}%</div>
-                </td>`;
-            }).join('')}
+            <td colspan="2" class="rk-left"><strong>Total Hadir (✅)</strong></td>
+            <td class="rk-center"><strong>${present} / ${rows.length}</strong></td>
+            <td class="rk-left"></td>
+            <td class="rk-center rk-cell-total">
+                <div class="rk-total-val">${pct}%</div>
+            </td>
         </tr>
     </tfoot>`;
 
-    table.innerHTML = thead + tbody + tfoot;
+    table.innerHTML = `<thead><tr>
+        <th width="50">No</th>
+        <th class="rk-left" width="150">Tanggal</th>
+        <th class="rk-left">Nama</th>
+        <th class="rk-left">Materi</th>
+        <th class="rk-center" width="90">Status</th>
+    </tr></thead><tbody>${bodyRows}</tbody>${tfoot}`;
 }
 
 // ---------------------------------------------------------------

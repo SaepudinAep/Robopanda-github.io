@@ -107,6 +107,7 @@ Catatan: skema billing sudah dicek live ke Supabase (`billing_periods`: 7+ baris
 
 | 2026-09-10 | **v2.5 — Private = Gabung per GROUP** (jangan per kelas): dropdown private kini daftar **group_private** (hanya group dengan ≥1 kelas aktif, mirip Billing); fetch data gabung semua kelas group (`.in('class_id')` students + pertemuan; attendance filter manual via pertemuan_id); tabel absensi & materi menampilkan **class tag** per siswa/sesi; header "Group X • Owner"; label filter dinamik "Pilih Group"/"Pilih Kelas"; student private auto-resolve group kelasnya. `APP_VERSION` → 8.2. | `rekap-absensi-module.js` (`isiDropdownKelasPrivate`, `fetchPrivateData`, `renderAbsensiWorksheet`, `renderMateriTable`, `fillReportHeader`), `assets/js/index.js:29` |
 Migration opsional di database live (agar relasi bersih, tanpa mengubah query kode):
+| 2026-09-10 | **v2.6 — Tab Absensi tabel vertikal** (ke bawah, bukan matriks siswa×sesi): kolom **No | Tanggal | Nama | Materi | Status**; satu baris per record absensi (student × sesi), urut tanggal DESC; grup "Siklus N" per periode tetap; footer Total Hadir (✅ n/m + %). `APP_VERSION` → 8.4. | `rekap-absensi-module.js` (`renderAbsensiWorksheet`), `assets/js/index.js:29` |
 ```sql
 ALTER TABLE public.attendance_private DROP CONSTRAINT fk_pertemuan;
 ALTER TABLE public.attendance_private DROP CONSTRAINT fk_student;
