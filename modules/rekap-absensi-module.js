@@ -578,7 +578,9 @@ async function fetchSchoolData() {
         judul: p.materi?.title || '(tanpa judul)',
         uraian: (p.materi?.description || p.materi?.detail || '').trim()
     }));
-    app.attendance = rAtt.data || [];
+    // [HIDE] Attendance dari siswa tidak aktif disembunyikan (konsisten tabel vertikal)
+    const activeStudentIds = new Set(app.students.map(s => s.id));
+    app.attendance = (rAtt.data || []).filter(r => activeStudentIds.has(r.student_id));
     return true;
 }
 
@@ -649,8 +651,9 @@ async function fetchPrivateData() {
         className: classMap.get(p.class_id) || ''
     }));
 
-    // Map student_id -> nama & className (termasuk siswa non-aktif) untuk penggabungan
+    // Map student_id -> nama & className (termasuk siswa non-aktif) untuk lookup
     const pertemuanIds = new Set(app.pertemuanList.map(p => p.id));
+    const activeStudentIds = new Set(app.students.map(s => s.id));
     const studentNameById = new Map();
     const studentClassById = new Map();
     app.privateClassMap = new Map();
@@ -660,14 +663,14 @@ async function fetchPrivateData() {
         app.privateClassMap.set(s.id, classMap.get(s.class_id) || '');
     });
 
-    // Filter manual ke sesi group (karena tidak ada kolom class di attendance_private)
+    // Filter manual ke sesi group + siswa AKTIF (kelas/siswa tidak aktif disembunyikan)
     app.attendance = (rAtt.data || [])
-        .filter(r => pertemuanIds.has(r.pertemuan_id))
+        .filter(r => pertemuanIds.has(r.pertemuan_id) && activeStudentIds.has(r.student_id))
         .map(r => ({
             id: r.id,
             student_id: r.student_id,
             pertemuan_id: r.pertemuan_id,
-            student: { id: r.student_id, name: studentNameById.get(r.student_id) || '' }, // untuk penggabungan siswa non-aktif
+            student: { id: r.student_id, name: studentNameById.get(r.student_id) || '' }, // untuk penggabungan lookup
             className: studentClassById.get(r.student_id) || '',
             status: (r.sikap != null || r.fokus != null || r.pemahaman != null || (r.detail && String(r.detail).trim())) ? '1' : null
         }));
