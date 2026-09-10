@@ -99,6 +99,7 @@ Fondasi UI/UX modul sudah rapi, konsisten dengan modul lain, dan XSS-safe. Namun
 | 2026-09-10 | **Bug embed ambigu** — perbaikan akhir: `attendance_private` ditarik **tanpa embed join** lalu disaring manual per kelas via `pertemuan_id` (Solusi hint nama constraint di baris 534 gagal karena nama constraint di live DB tidak dikenali PostgREST "_Could not find a relationship_"). Nama siswa dibangun dari map `students_private` (termasuk non-aktif). | `rekap-absensi-module.js:530-574` |
 | 2026-09-10 | **Bump `APP_VERSION` 7.6 → 7.7** — error "Could not find a relationship" masih muncul karena browser mengeksekusi modul lama dari cache (`import(...?v=7.6)`). Tanpa bump versi, perbaikan modul tidak pernah dimuat. | `assets/js/index.js:29` |
 | 2026-09-10 | **Billing cycle di Rekap (v2.3)** — sesuai pilihan: dropdown **"Siklus"** (dari `billing_periods` private per `group_id` / `billing_periods_sekolah` per `class_id`) + **section/kelompok "Siklus N"** di tab Absensi (baris header colspan) dan tab Materi (baris judul grup). Sesi dipetakan ke siklus secara kronologis (tanggal naik, `quota_sessions`/`contract_sessions` per siklus). `APP_VERSION` → 7.8. | `rekap-absensi-module.js` (state, `fetchBillingPeriods`/`buildPeriodMap`/`populatePeriodFilter`/`buildPeriodGroups`), `assets/js/index.js:29` |
+| 2026-09-10 | **AKAR MASALAH deploy**: error "Could not find a relationship … attendance_private" **persist karena fix modul hanya ada di commit lokal `01c89dd`, belum pernah di-push**. `origin/main` masih di `64b84a5` (kode lama ber-embed) → situs live (GitHub Pages) tidak pernah menerima perbaikan. Solusi: commit `01c89dd` + `d1e57f5` (cache-bust `index.html` `?v=` + `APP_VERSION` 7.9) **di-push ke origin/main**. Sesi verifikasi live: query polos `attendance_private?select=id,student_id,pertemuan_id` jalan fine → error memang dari kode lama. | `index.html:99`, `assets/js/index.js:29` |
 
 Catatan: skema billing sudah dicek live ke Supabase (`billing_periods`: 7+ baris; `billing_periods_sekolah`: 1 baris). `pertemuan_ke` NULL → pengelompokan memakai urutan tanggal + kuota sesi per periode.
 
@@ -107,4 +108,4 @@ Migration opsional di database live (agar relasi bersih, tanpa mengubah query ko
 ALTER TABLE public.attendance_private DROP CONSTRAINT fk_pertemuan;
 ALTER TABLE public.attendance_private DROP CONSTRAINT fk_student;
 ```
-(Query modul tetap memakai hint `attendance_private_pertemuan_id_fkey` / `attendance_private_student_id_fkey`, jadi tetap aman baik sebelum maupun sesudah migrasi.
+(Query modul kini **tanpa embed** — tidak lagi menyentuh relasi `pertemuan_id` — sehingga aman baik sebelum maupun sesudah migrasi constraint duplikat dijalankan.)
