@@ -1,7 +1,7 @@
 /**
  * Project: Robopanda Client (Public/Student)
  * File: modules/rekap-absensi-module.js
- * Version: 2.3 - Filter & pemetaan sesi berbasis billing cycle (Siklus/sesi per periode)
+ * Version: 2.4 - Alokasi siklus private berbasis model Billing global grup (Regula + carry + status kuota)
  *
  * Description:
  *  Laporan absensi & materi/silabus terajarkan per kelas, mengikuti
@@ -50,9 +50,11 @@ let app = {
     pertemuanList: [],      // [{ id, tanggal, judul, uraian }] urut ascending
     attendance: [],         // baris attendance (semua pertemuan) untuk kelas ini
     activeTab: 'absensi',   // tab yang sedang tampil ('absensi' | 'materi')
-    periods: [],            // [{ id, label, start, end, quota, status }] siklus billing kelas aktif
+    periods: [],            // [{ id, label, start_date, quota, status, pakai, sisa, habis, overflow }]
     periodMap: {},          // pertemuan_id -> index di app.periods; -1 = tidak berperiode
-    periodFilter: null      // null = 'Semua'; index periode / -1 = filter siklus aktif
+    periodFilter: null,     // null = 'Semua'; index periode / -1 = filter siklus aktif
+    periodAlloc: {},        // [private] pertemuan_id -> { periodIdx } alokasi global grup
+    periodAllocDone: false  // [private] alokasi global grup siap
 };
 
 // ---------------------------------------------------------------
@@ -131,6 +133,8 @@ export async function init(canvas, opts = {}) {
     app.periods = [];
     app.periodMap = {};
     app.periodFilter = null;
+    app.periodAlloc = {};
+    app.periodAllocDone = false;
 
     // [MAPPING GALLERY] Konteks awal persis seperti Gallery Module:
     // - privileged (super_admin/teacher/pic) -> selalu 'school'
@@ -202,6 +206,7 @@ export async function init(canvas, opts = {}) {
                 <div class="rk-range" id="rk-period-row" style="display:none;">
                     <label><i class="fa-solid fa-route"></i> Siklus:</label>
                     <select id="rk-period" class="rk-input-mini"></select>
+                    <span class="rk-period-note" id="rk-period-note"></span>
                 </div>
             </div>
 
@@ -471,6 +476,8 @@ async function handleLoadRekap() {
         group_id: opt.dataset.group || ''
     };
     app.periodFilter = null;
+    app.periodAlloc = {};
+    app.periodAllocDone = false;
 
     fillReportHeader();
     document.getElementById('rk-range-start').innerHTML = '<option value="-1">Memuat...</option>';
@@ -508,6 +515,10 @@ async function loadClassData() {
     // [BILLING CYCLE] Muat siklus billing kelas aktif, petakan sesi -> siklus,
     // lalu isi dropdown filter "Siklus" (kalau ada data periode).
     await fetchBillingPeriods();
+    // [PRIVATE] Alokasi siklus berbasis model Billing global grup (Regula):
+    // periode lebih old wajib digi pieni dahulu, sesi dikonsumsi kronologis
+    // GABUNGAN semua kelas dalam group (unit = pertemuan_private, bobot jumlah_sesi).
+    if (app.activeCtx === 'private') await buildGlobalPeriodAllocation();
     buildPeriodMap();
 
     populateRange();
@@ -647,6 +658,8 @@ function hideReport() {
     app.periods = [];
     app.periodMap = {};
     app.periodFilter = null;
+    app.periodAlloc = {};
+    app.periodAllocDone = false;
     const pr = document.getElementById('rk-period-row');
     if (pr) pr.style.display = 'none';
 }
@@ -701,8 +714,14 @@ async function fetchBillingPeriods() {
             app.periods = (data || []).map(p => ({
                 id: p.id,
                 label: p.periode_label || '',
+                start_date: p.start_date,
                 quota: p.quota_sessions ?? 4,
-                status: p.status || 'aktif'
+                status: p.status || 'aktif',
+                // Dicomputa oleh buildGlobalPeriodAllocation()
+                pakai: 0,
+                sisa: p.quota_sessions ?? 4,
+                habis: false,
+                overflow: 0
             }));
         } else {
             const cid = app.activeClass?.id;
@@ -723,16 +742,124 @@ async function fetchBillingPeriods() {
     }
 }
 
-// Petakan tiap pertemuan ke indeks periode-nya (kronologis berdasar tanggal).
-// Jika tidak ada periode/billing -> semua masuk 'Tanpa Siklus' (-1).
+// ---------------------------------------------------------------
+// 4c. [PRIVATE] ALOKASI SIKLUS GLOBAL GRUP (mirip Billing Module)
+// "Regula": periode yang lebih lama wajib digi pieni sampai kuota kontrak
+// dalam jumlah SESI keshan yan sebelum sesi masuk periode yang lebih baru.
+// Sesi konsumo KRONOLOGIS di seluruh kelas milik group; unit = 1 pertemuan
+// (pertemuan_private.id), bobot jumlah_sesi (default 1, bisa 2). Pertemuan
+// 2-sesi yang memotong batas kuota -> split/carry ke periode berikut.
+// Output: app.periodAlloc (pertemuan_id -> { periodIdx }) + statistik
+// pakai/sisa/habis/overflow per periode (dicomputa dari seluruh group).
+// ---------------------------------------------------------------
+async function buildGlobalPeriodAllocation() {
+    app.periodAlloc = {};
+    app.periodAllocDone = false;
+    const gid = app.activeClass?.group_id;
+    if (!gid || !app.periods.length) return;
+
+    try {
+        // Semua kelas di group (untuk gabungan global kuota)
+        const { data: groupClasses } = await supabase
+            .from('class_private')
+            .select('id, name')
+            .eq('group_id', gid);
+        const classIds = (groupClasses || []).map(c => c.id);
+        if (!classIds.length) return;
+
+        // Semua pertemuan group urut TANGGAL ASC (unit = pertemuan, bobot jumlah_sesi)
+        const { data: allP } = await supabase
+            .from('pertemuan_private')
+            .select('id, class_id, tanggal, jumlah_sesi')
+            .in('class_id', classIds)
+            .order('tanggal', { ascending: true });
+
+        const sessionsAsc = [...(allP || [])].sort((a, b) =>
+            String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
+
+        // Sesi DIBUUTA sebelum awalnya periode pertama -> diskip (ikut Regula billing)
+        const firstStart = String(app.periods[0].start_date || '9999-12-31');
+        let idx = 0;
+        while (idx < sessionsAsc.length && String(sessionsAsc[idx].tanggal || '') < firstStart) idx++;
+
+        let carryLeft = 0;
+        let carryItem = null;
+
+        app.periods.forEach((period, pi) => {
+            const q = period.quota;
+            let acc = 0;
+
+            // 1) Konsum carry (pertemuan 2-sesi yang memotong batas periode sebelum)
+            if (carryLeft > 0 && acc < q) {
+                const take = Math.min(carryLeft, q - acc);
+                if (!app.periodAlloc[carryItem.id]) {
+                    app.periodAlloc[carryItem.id] = { periodIdx: pi };
+                }
+                acc += take;
+                carryLeft -= take;
+                if (carryLeft <= 0) carryItem = null;
+            }
+
+            // 2) Konsum sesi berikutnya KRONOLOGIS (TIDAK berhento di tanggal)
+            while (acc < q && idx < sessionsAsc.length) {
+                const s = sessionsAsc[idx];
+                const js = Number(s.jumlah_sesi) || 1;
+                const need = q - acc;
+                const take = Math.min(js, need);
+                if (!app.periodAlloc[s.id]) {
+                    // map ke periode di mana pertemuan MULAI (split -> periode pertama)
+                    app.periodAlloc[s.id] = { periodIdx: pi };
+                }
+                acc += take;
+                if (js <= need) {
+                    idx++;
+                } else {
+                    // Split: kudangan pertama di periode ini, remainder carry ke berikut
+                    carryLeft = js - need;
+                    carryItem = s;
+                    idx++;
+                    acc = q;
+                    break;
+                }
+            }
+
+            // Statistik periode (global group)
+            period.pakai = acc;
+            period.sisa = Math.max(0, q - acc);
+            period.habis = acc >= q;
+            if (pi === app.periods.length - 1) {
+                let oflow = carryLeft;
+                for (let j = idx; j < sessionsAsc.length; j++) oflow += Number(sessionsAsc[j].jumlah_sesi) || 1;
+                period.overflow = Math.max(0, oflow);
+            }
+        });
+        app.periodAllocDone = true;
+    } catch (err) {
+        console.error('[Rekap] Gagal alokasi siklus global grup:', err);
+    }
+}
+
+// Petakan tiap pertemuan (kelas aktif) ke indeks periode-nya.
+// [PRIVATE] -> hasil alokasi GLOBAL grup (4c) sesuai model Billing.
+// [SEKOLAH] -> alokasi kronologis per kelas (kontrak berbaris per kelas).
+// Tanpa periode/billing -> semua masuk 'Tanpa Siklus' (-1).
 function buildPeriodMap() {
     const map = {};
     app.pertemuanList.forEach(p => { map[p.id] = -1; });
+
+    if (app.activeCtx === 'private') {
+        app.pertemuanList.forEach(p => {
+            const a = app.periodAlloc[p.id];
+            if (a && a.periodIdx >= 0) map[p.id] = a.periodIdx;
+        });
+        app.periodMap = map;
+        return;
+    }
+
     if (!app.periods.length) { app.periodMap = map; return; }
 
     const sortedAsc = [...app.pertemuanList].sort((a, b) =>
         String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
-
     let idx = 0;
     app.periods.forEach((period, periodIdx) => {
         for (let k = 0; k < period.quota && idx < sortedAsc.length; k++) {
@@ -747,13 +874,27 @@ function periodLabel(periodIdx, count) {
     const p = app.periods[periodIdx];
     if (!p) return 'Tanpa Siklus';
     const base = p.label || ('Siklus ' + (periodIdx + 1));
-    return count !== undefined ? `${base} (${count} sesi)` : `${base} (${p.quota} sesi)`;
+    const sesiTxt = count !== undefined ? `${count} sesi` : `${p.quota} sesi`;
+    let extra = '';
+    if (app.activeCtx === 'private' && app.periodAllocDone) {
+        if (p.habis) extra = ' · Kuota habis';
+        else if (p.sisa > 0) extra = ` · Sisa kuota ${p.sisa}`;
+        if (p.overflow > 0) extra += ` · +${p.overflow} overflow`;
+    }
+    return `${base} (${sesiTxt})${extra}`;
 }
 
 function populatePeriodFilter() {
     const row = document.getElementById('rk-period-row');
     const sel = document.getElementById('rk-period');
     if (!row || !sel) return;
+
+    const note = document.getElementById('rk-period-note');
+    if (note) {
+        note.textContent = (app.activeCtx === 'private')
+            ? 'Kuota global gabungan semua kelas group · periode lama pieni dahulu'
+            : 'Sesi per kelas · kontrak periode sekolah';
+    }
 
     if (!app.periods.length) {
         row.style.display = 'none';
@@ -1117,6 +1258,7 @@ function injectStyles() {
         .rk-cycle-group th { background: #ecfdf5; color: #047857; border-bottom: 2px solid #a7f3d0; font-size: .72rem; font-weight: 800; text-align: center; letter-spacing: .03em; padding: 6px 4px; }
         .rk-cycle-cell { white-space: nowrap; }
         .rk-cycle-hdr td { background: #ecfdf5; color: #047857; font-weight: 800; font-size: .75rem; text-align: left !important; letter-spacing: .03em; border-bottom: 2px solid #a7f3d0; padding: 7px 12px; }
+        .rk-period-note { font-size: .68rem; color: #64748b; font-weight: 600; margin-left: 6px; }
 
         @media (max-width: 720px) {
             .rk-control { flex-direction: column; align-items: stretch; }
