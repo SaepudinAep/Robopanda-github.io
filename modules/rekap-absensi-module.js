@@ -1,7 +1,7 @@
 /**
  * Project: Robopanda Client (Public/Student)
  * File: modules/rekap-absensi-module.js
- * Version: 2.2 - Mapping User Role disamakan persis dengan Gallery Module
+ * Version: 2.3 - Filter & pemetaan sesi berbasis billing cycle (Siklus/sesi per periode)
  *
  * Description:
  *  Laporan absensi & materi/silabus terajarkan per kelas, mengikuti
@@ -49,7 +49,10 @@ let app = {
     students: [],           // [{ id, name, grade }] siswa kelas aktif
     pertemuanList: [],      // [{ id, tanggal, judul, uraian }] urut ascending
     attendance: [],         // baris attendance (semua pertemuan) untuk kelas ini
-    activeTab: 'absensi'    // tab yang sedang tampil ('absensi' | 'materi')
+    activeTab: 'absensi',   // tab yang sedang tampil ('absensi' | 'materi')
+    periods: [],            // [{ id, label, start, end, quota, status }] siklus billing kelas aktif
+    periodMap: {},          // pertemuan_id -> index di app.periods; -1 = tidak berperiode
+    periodFilter: null      // null = 'Semua'; index periode / -1 = filter siklus aktif
 };
 
 // ---------------------------------------------------------------
@@ -125,6 +128,9 @@ export async function init(canvas, opts = {}) {
     app.activeClass = null;
     app.pertemuanList = [];
     app.activeTab = 'absensi';
+    app.periods = [];
+    app.periodMap = {};
+    app.periodFilter = null;
 
     // [MAPPING GALLERY] Konteks awal persis seperti Gallery Module:
     // - privileged (super_admin/teacher/pic) -> selalu 'school'
@@ -193,18 +199,18 @@ export async function init(canvas, opts = {}) {
                     <span>s/d</span>
                     <select id="rk-range-end" class="rk-input-mini"></select>
                 </div>
+                <div class="rk-range" id="rk-period-row" style="display:none;">
+                    <label><i class="fa-solid fa-route"></i> Siklus:</label>
+                    <select id="rk-period" class="rk-input-mini"></select>
+                </div>
             </div>
 
             <!-- Bagian Tabel Laporan (Hanya Absensi & Materi) -->
             <section class="rk-section" id="rk-section-absensi" style="display:none;">
-                <div class="rk-table-wrapper">
-                    <table class="rk-table" id="rk-table-absensi"></table>
-                </div>
+                <div id="rk-wrap-absensi" class="rk-table-wrapper"></div>
             </section>
             <section class="rk-section" id="rk-section-materi" style="display:none;">
-                <div class="rk-table-wrapper">
-                    <table class="rk-table" id="rk-table-materi"></table>
-                </div>
+                <div id="rk-wrap-materi" class="rk-table-wrapper"></div>
             </section>
         </div>`;
 
@@ -337,7 +343,7 @@ async function isiDropdownKelasPrivate() {
 
     let query = supabase
         .from('class_private')
-        .select('id, name, level, group_private:group_id(owner, code)')
+        .select('id, name, level, group_id, group_private:group_id(owner, code)')
         .order('name');
 
     // PIC hanya melihat kelas private dari group-nya sendiri
@@ -357,7 +363,7 @@ async function isiDropdownKelasPrivate() {
     // Label: nama kelas + nama owner group (orang tua/peserta) bila tersedia
     selClass.innerHTML = '<option value="" disabled selected>-- Pilih Kelas --</option>' +
         data.map(c =>
-            `<option value="${c.id}" data-name="${escapeHtml(c.name || '')}" data-jadwal="" data-level="${escapeHtml(c.level || '')}" data-school="${escapeHtml(c.group_private?.owner || '')}">
+            `<option value="${c.id}" data-name="${escapeHtml(c.name || '')}" data-jadwal="" data-level="${escapeHtml(c.level || '')}" data-school="${escapeHtml(c.group_private?.owner || '')}" data-group="${escapeHtml(c.group_id || '')}">
                 ${escapeHtml(c.name || '(tanpa nama)')}${c.group_private?.owner ? ' (' + escapeHtml(c.group_private.owner) + ')' : ''}
             </option>`
         ).join('');
@@ -389,10 +395,11 @@ async function isiDropdownKelasStudent() {
         };
     } else {
         const { data } = await supabase.from('class_private')
-            .select('id, name, level, group_private:group_id(owner, code)').eq('id', cid).maybeSingle();
+            .select('id, name, level, group_id, group_private:group_id(owner, code)').eq('id', cid).maybeSingle();
         if (data) opt = {
             id: data.id, name: data.name || '', jadwal: '',
             level: data.level || '', school: data.group_private?.owner || '',
+            group_id: data.group_id || '',
             label: `${data.name || '(tanpa nama)'}${data.group_private?.owner ? ' (' + data.group_private.owner + ')' : ''}`
         };
     }
@@ -456,8 +463,10 @@ async function handleLoadRekap() {
         name: opt.dataset.name || '',
         jadwal: opt.dataset.jadwal || '',
         level: opt.dataset.level || '',
-        schoolName: opt.dataset.school || ''
+        schoolName: opt.dataset.school || '',
+        group_id: opt.dataset.group || ''
     };
+    app.periodFilter = null;
 
     fillReportHeader();
     document.getElementById('rk-range-start').innerHTML = '<option value="-1">Memuat...</option>';
@@ -492,7 +501,13 @@ async function loadClassData() {
     // Dijamin ulang di sisi client agar konsisten apapun hasil ordering DB.
     app.pertemuanList.sort((a, b) => String(b.tanggal || '').localeCompare(String(a.tanggal || '')));
 
+    // [BILLING CYCLE] Muat siklus billing kelas aktif, petakan sesi -> siklus,
+    // lalu isi dropdown filter "Siklus" (kalau ada data periode).
+    await fetchBillingPeriods();
+    buildPeriodMap();
+
     populateRange();
+    populatePeriodFilter();
     updateStatsBadges();
     return true;
 }
@@ -528,10 +543,16 @@ async function fetchSchoolData() {
 //   tidak ada baris      -> Belum Dinilai (null)
 // (Alpa tidak pernah muncul di mode private karena tidak ada field statusnya.)
 async function fetchPrivateData() {
+    // [FIX 2026-09-10] Query attendance_private TANPA embed join.
+    // Live DB sebelumnya punya FK name yang tidak konsisten (duplikat / di-rename)
+    // sehingga PostgREST gagal: "more than one relationship" lalu setelah diberi hint
+    // nama constraint: "Could not find a relationship". Solusi robust: tarik semua
+    // baris lama 'attendance_private' lalu disaring manual per kelas lewat
+    // pertemuan_id yang sudah dimuat dari pada pertemuan_private.
     const [rStudents, rPert, rAtt] = await Promise.all([
-        supabase.from('students_private').select('id, name').eq('class_id', app.activeClass.id).eq('is_active', true).order('name'),
+        supabase.from('students_private').select('id, name, is_active').eq('class_id', app.activeClass.id).order('name'),
         supabase.from('pertemuan_private').select('id, tanggal, pertemuan_ke, materi_private:materi_id(judul, deskripsi, detail)').eq('class_id', app.activeClass.id).order('tanggal', { ascending: false }),
-        supabase.from('attendance_private').select('id, student_id, pertemuan_id, sikap, fokus, pemahaman, detail, student:student_id(name), pertemuan:pertemuan_id!inner(tanggal)').eq('pertemuan.class_id', app.activeClass.id)
+        supabase.from('attendance_private').select('id, student_id, pertemuan_id, sikap, fokus, pemahaman, detail')
     ]);
 
     if (rStudents.error) { alert('Gagal memuat siswa: ' + rStudents.error.message); return false; }
@@ -539,20 +560,31 @@ async function fetchPrivateData() {
     if (rAtt.error) { alert('Gagal memuat absensi: ' + rAtt.error.message); return false; }
 
     // Siswa private tidak punya kolom grade
-    app.students = (rStudents.data || []).map(s => ({ id: s.id, name: s.name || '', grade: '' }));
+    app.students = (rStudents.data || [])
+        .filter(s => s.is_active !== false)
+        .map(s => ({ id: s.id, name: s.name || '', grade: '' }));
     app.pertemuanList = (rPert.data || []).map(p => ({
         id: p.id,
         tanggal: p.tanggal,
         judul: p.materi_private?.judul || '(tanpa judul)',
         uraian: (p.materi_private?.deskripsi || p.materi_private?.detail || '').trim()
     }));
-    app.attendance = (rAtt.data || []).map(r => ({
-        id: r.id,
-        student_id: r.student_id,
-        pertemuan_id: r.pertemuan_id,
-        student: r.student, // untuk penggabungan siswa yang tidak lagi aktif
-        status: (r.sikap != null || r.fokus != null || r.pemahaman != null || (r.detail && String(r.detail).trim())) ? '1' : null
-    }));
+
+    // Map id->nama (termasuk siswa non-aktif) untuk mengisi nama saat penggabungan
+    const pertemuanIds = new Set(app.pertemuanList.map(p => p.id));
+    const studentNameById = new Map();
+    (rStudents.data || []).forEach(s => { if (s?.name) studentNameById.set(s.id, s.name); });
+
+    // Filter manual ke kelas aktif (karena tidak ada kolom class di attendance_private)
+    app.attendance = (rAtt.data || [])
+        .filter(r => pertemuanIds.has(r.pertemuan_id))
+        .map(r => ({
+            id: r.id,
+            student_id: r.student_id,
+            pertemuan_id: r.pertemuan_id,
+            student: { id: r.student_id, name: studentNameById.get(r.student_id) || '' }, // untuk penggabungan siswa non-aktif
+            status: (r.sikap != null || r.fokus != null || r.pemahaman != null || (r.detail && String(r.detail).trim())) ? '1' : null
+        }));
     return true;
 }
 
@@ -608,6 +640,11 @@ function hideReport() {
     app.students = [];
     app.pertemuanList = [];
     app.attendance = [];
+    app.periods = [];
+    app.periodMap = {};
+    app.periodFilter = null;
+    const pr = document.getElementById('rk-period-row');
+    if (pr) pr.style.display = 'none';
 }
 
 // ---------------------------------------------------------------
@@ -627,13 +664,126 @@ function getRangePertemuanList() {
     const start = parseInt(document.getElementById('rk-range-start').value, 10);
     const end = parseInt(document.getElementById('rk-range-end').value, 10);
 
-    if (start === -1 && end === -1) return app.pertemuanList.slice();
+    let list;
+    if (start === -1 && end === -1) {
+        list = app.pertemuanList.slice();
+    } else {
+        let i0 = start === -1 ? 0 : start;
+        let i1 = end === -1 ? app.pertemuanList.length - 1 : end;
+        if (i1 < i0) { const t = i0; i0 = i1; i1 = t; }
+        list = app.pertemuanList.slice(i0, i1 + 1);
+    }
 
-    let i0 = start === -1 ? 0 : start;
-    let i1 = end === -1 ? app.pertemuanList.length - 1 : end;
-    if (i1 < i0) { const t = i0; i0 = i1; i1 = t; }
+    // [BILLING CYCLE] Filter siklus aktif (jika user memilih salah satu periode)
+    if (app.periodFilter !== null && app.periodFilter !== undefined) {
+        list = list.filter(p => (app.periodMap[p.id] ?? -1) === app.periodFilter);
+    }
+    return list;
+}
 
-    return app.pertemuanList.slice(i0, i1 + 1);
+// ---------------------------------------------------------------
+// 4b. BILLING CYCLE — siklus tagihan (sesi per periode) & filter
+// ---------------------------------------------------------------
+async function fetchBillingPeriods() {
+    app.periods = [];
+    try {
+        if (app.activeCtx === 'private') {
+            const gid = app.activeClass?.group_id || app.userProfile?.group_id;
+            if (!gid) return;
+            const { data } = await supabase.from('billing_periods')
+                .select('id, periode_label, start_date, quota_sessions, status')
+                .eq('group_id', gid)
+                .order('start_date', { ascending: true });
+            app.periods = (data || []).map(p => ({
+                id: p.id,
+                label: p.periode_label || '',
+                quota: p.quota_sessions ?? 4,
+                status: p.status || 'aktif'
+            }));
+        } else {
+            const cid = app.activeClass?.id;
+            if (!cid) return;
+            const { data } = await supabase.from('billing_periods_sekolah')
+                .select('id, periode_label, contract_sessions, status')
+                .eq('class_id', cid)
+                .order('start_date', { ascending: true });
+            app.periods = (data || []).map(p => ({
+                id: p.id,
+                label: p.periode_label || '',
+                quota: p.contract_sessions ?? 4,
+                status: p.status || 'aktif'
+            }));
+        }
+    } catch (err) {
+        console.error('[Rekap] Gagal memuat billing cycle:', err);
+    }
+}
+
+// Petakan tiap pertemuan ke indeks periode-nya (kronologis berdasar tanggal).
+// Jika tidak ada periode/billing -> semua masuk 'Tanpa Siklus' (-1).
+function buildPeriodMap() {
+    const map = {};
+    app.pertemuanList.forEach(p => { map[p.id] = -1; });
+    if (!app.periods.length) { app.periodMap = map; return; }
+
+    const sortedAsc = [...app.pertemuanList].sort((a, b) =>
+        String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
+
+    let idx = 0;
+    app.periods.forEach((period, periodIdx) => {
+        for (let k = 0; k < period.quota && idx < sortedAsc.length; k++) {
+            map[sortedAsc[idx].id] = periodIdx;
+            idx++;
+        }
+    });
+    app.periodMap = map;
+}
+
+function periodLabel(periodIdx, count) {
+    const p = app.periods[periodIdx];
+    if (!p) return 'Tanpa Siklus';
+    const base = p.label || ('Siklus ' + (periodIdx + 1));
+    return count !== undefined ? `${base} (${count} sesi)` : `${base} (${p.quota} sesi)`;
+}
+
+function populatePeriodFilter() {
+    const row = document.getElementById('rk-period-row');
+    const sel = document.getElementById('rk-period');
+    if (!row || !sel) return;
+
+    if (!app.periods.length) {
+        row.style.display = 'none';
+        sel.innerHTML = '';
+        app.periodFilter = null;
+        return;
+    }
+
+    const prev = app.periodFilter;
+    sel.innerHTML = '<option value="">Semua Siklus</option>' +
+        app.periods.map((p, i) => `<option value="${i}">${periodLabel(i)}</option>`).join('');
+
+    // Pertahankan pilihan periode lama bila masih valid
+    app.periodFilter = (prev !== null && prev !== undefined && prev >= 0 && prev < app.periods.length) ? prev : null;
+    sel.value = (app.periodFilter === null) ? '' : String(app.periodFilter);
+    row.style.display = '';
+}
+
+// Kelompokkan list sesi terurut menjadi blok per periode (untuk heading tabel)
+function buildPeriodGroups(sessions) {
+    const groups = [];
+    sessions.forEach(s => {
+        const pi = app.periodMap[s.id] ?? -1;
+        const key = pi < 0 ? 'x' : String(pi);
+        const last = groups[groups.length - 1];
+        if (last && last.key === key) {
+            last.count++;
+            last.sessions.push(s);
+        } else {
+            groups.push({ key, pi, label: pi < 0 ? 'Tanpa Siklus' : periodLabel(pi), count: 1, sessions: [s] });
+        }
+    });
+    groups.forEach(g => { if (g.pi >= 0) g.label = periodLabel(g.pi, g.count); });
+    return groups;
 }
 
 // ---------------------------------------------------------------
@@ -666,7 +816,19 @@ function renderAbsensiWorksheet() {
         return count;
     });
 
-    const thead = `<thead><tr>
+    // [BILLING CYCLE] Baris header pengelompokan per siklus (hanya jika ada data periode & >1 kelompok)
+    const hasPeriods = app.periods.length > 0;
+    const groups = buildPeriodGroups(sessions);
+    const groupRow = (hasPeriods && groups.length > 1)
+        ? `<tr class="rk-cycle-group">
+            <th class="rk-sticky rk-col-no"></th>
+            <th class="rk-sticky rk-col-name"></th>
+            <th class="rk-sticky rk-col-grade"></th>
+            ${groups.map(g => `<th class="rk-cycle-cell" colspan="${Math.max(g.count, 1)}">${escapeHtml(g.label)}</th>`).join('')}
+        </tr>`
+        : '';
+
+    const thead = `<thead>${groupRow}<tr>
         <th class="rk-sticky rk-col-no" width="40">No</th>
         <th class="rk-sticky rk-col-name rk-left">Nama Siswa</th>
         <th class="rk-sticky rk-col-grade rk-left">Grade</th>
@@ -723,18 +885,32 @@ function renderMateriTable() {
         return;
     }
 
+    // [BILLING CYCLE] Bagian tabel dipisah per siklus dengan baris judul.
+    // Baris judul hanya ditampilkan bila ada periode billing (siklus) terkonfigurasi.
+    const hasPeriods = app.periods.length > 0;
+    const groups = buildPeriodGroups(slice);
+    let sesiNo = 0;
+    const bodyRows = groups.map(g => {
+        const hdr = hasPeriods
+            ? `<tr class="rk-cycle-hdr"><td colspan="4">${escapeHtml(g.label)}</td></tr>`
+            : '';
+        return hdr + g.sessions.map(r => {
+            sesiNo++;
+            return `<tr>
+                <td class="rk-center"><strong>${sesiNo}</strong></td>
+                <td class="rk-left" style="white-space:nowrap;">${escapeHtml(fmtDateLong(r.tanggal))}</td>
+                <td class="rk-left"><strong>${escapeHtml(r.judul)}</strong></td>
+                <td class="rk-left">${escapeHtml(r.uraian) || '<em style="color:#94a3b8">Tidak ada uraian</em>'}</td>
+            </tr>`;
+        }).join('');
+    }).join('');
+
     table.innerHTML = `<thead><tr>
         <th width="50">Sesi</th>
         <th class="rk-left" width="140">Tanggal</th>
         <th class="rk-left" width="220">Nama Materi</th>
         <th class="rk-left">Uraian / Capaian Pembelajaran</th>
-    </tr></thead><tbody>` +
-        slice.map((r, i) => `<tr>
-            <td class="rk-center"><strong>${i + 1}</strong></td>
-            <td class="rk-left" style="white-space:nowrap;">${escapeHtml(fmtDateLong(r.tanggal))}</td>
-            <td class="rk-left"><strong>${escapeHtml(r.judul)}</strong></td>
-            <td class="rk-left">${escapeHtml(r.uraian) || '<em style="color:#94a3b8">Tidak ada uraian</em>'}</td>
-        </tr>`).join('') + `</tbody>`;
+    </tr></thead><tbody>${bodyRows}</tbody>`;
 }
 
 // ---------------------------------------------------------------
@@ -842,6 +1018,16 @@ function setupEvents() {
     };
     document.getElementById('rk-range-start').addEventListener('change', reloadActiveTab);
     document.getElementById('rk-range-end').addEventListener('change', reloadActiveTab);
+
+    // Filter Siklus (billing cycle)
+    const selPeriod = document.getElementById('rk-period');
+    if (selPeriod) {
+        selPeriod.addEventListener('change', () => {
+            const v = selPeriod.value;
+            app.periodFilter = (v === '' || v === null || v === undefined) ? null : parseInt(v, 10);
+            reloadActiveTab();
+        });
+    }
 }
 
 // ---------------------------------------------------------------
@@ -922,6 +1108,11 @@ function injectStyles() {
         .rk-cell-total { padding: 6px !important; }
         .rk-total-val { font-size: 0.95rem; font-weight: 800; color: #15803d; }
         .rk-total-pct { font-size: 0.68rem; color: #166534; font-weight: 600; }
+
+        /* Baris/header pengelompokan siklus (billing cycle) */
+        .rk-cycle-group th { background: #ecfdf5; color: #047857; border-bottom: 2px solid #a7f3d0; font-size: .72rem; font-weight: 800; text-align: center; letter-spacing: .03em; padding: 6px 4px; }
+        .rk-cycle-cell { white-space: nowrap; }
+        .rk-cycle-hdr td { background: #ecfdf5; color: #047857; font-weight: 800; font-size: .75rem; text-align: left !important; letter-spacing: .03em; border-bottom: 2px solid #a7f3d0; padding: 7px 12px; }
 
         @media (max-width: 720px) {
             .rk-control { flex-direction: column; align-items: stretch; }

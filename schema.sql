@@ -235,8 +235,6 @@ CREATE TABLE public.attendance_private (
   detail text,
   catatan text,
   CONSTRAINT attendance_private_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_pertemuan FOREIGN KEY (pertemuan_id) REFERENCES public.pertemuan_private(id),
-  CONSTRAINT fk_student FOREIGN KEY (student_id) REFERENCES public.students_private(id),
   CONSTRAINT attendance_private_pertemuan_id_fkey FOREIGN KEY (pertemuan_id) REFERENCES public.pertemuan_private(id),
   CONSTRAINT attendance_private_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students_private(id),
   CONSTRAINT attendance_private_materi_id_fkey FOREIGN KEY (materi_id) REFERENCES public.materi_private(id)
