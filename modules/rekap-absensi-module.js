@@ -1,7 +1,7 @@
 /**
  * Project: Robopanda Client (Public/Student)
  * File: modules/rekap-absensi-module.js
- * Version: 2.7 - Tab Absensi: kolom Sesi (nomor sesi) ganti Status
+ * Version: 2.8 - Absensi: Private=vertikal, Sekolah=matriks (No|Nama|Grade|Sesi 1..N)
  *
  * Description:
  *  Laporan absensi & materi/silabus terajarkan per kelas, mengikuti
@@ -1012,10 +1012,17 @@ function buildPeriodGroups(sessions) {
 // 5. TAB ABSENSI (Dengan Baris Total Hadir di Footer)
 // ---------------------------------------------------------------
 // ---------------------------------------------------------------
-// 5. TAB ABSENSI (Tabel Vertikal: No | Tanggal | Nama | Materi | Status)
-//    — ke bawah, bukan matriks siswa × sesi.
+// 5. TAB ABSENSI
+//    [Private] tabel VERTIKAL ke bawah: No | Tanggal | Nama | Materi | Sesi
+//    [Sekolah] MATRIKS siswa × sesi:    No | Nama | Grade | Sesi 1..N (terbaru dulu)
 // ---------------------------------------------------------------
 function renderAbsensiWorksheet() {
+    if (app.activeCtx === 'private') return renderAbsensiPrivate();
+    renderAbsensiSchoolMatrix();
+}
+
+// [Private] Tabel vertikal ke bawah (gabung per GROUP)
+function renderAbsensiPrivate() {
     const table = document.getElementById('rk-table-absensi');
     const sessions = getRangePertemuanList();
     const sessionIds = new Set(sessions.map(s => s.id));
@@ -1102,6 +1109,91 @@ function renderAbsensiWorksheet() {
         <th class="rk-left">Materi</th>
         <th class="rk-center" width="90">Sesi</th>
     </tr></thead><tbody>${bodyRows}</tbody>${tfoot}`;
+}
+
+// [Sekolah] MATRIKS siswa × sesi (No | Nama | Grade | Sesi 1..N), urut terbaru dulu.
+// `getRangePertemuanList()` urut tanggal DESC -> Sesi 1 = sesi terbaru.
+function renderAbsensiSchoolMatrix() {
+    const table = document.getElementById('rk-table-absensi');
+    const sessions = getRangePertemuanList();
+    const totalStudents = app.students.length;
+
+    if (!sessions.length || !totalStudents) {
+        table.innerHTML = `<thead><tr><th>Absensi</th></tr></thead>
+            <tbody><tr><td class="rk-empty">Belum ada data absensi untuk kelas/rentang ini.</td></tr></tbody>`;
+        return;
+    }
+
+    // Peta (student_id|pertemuan_id) -> record
+    const byKey = new Map();
+    app.attendance.forEach(r => byKey.set(r.student_id + '|' + r.pertemuan_id, r));
+
+    // Hitung total hadir per kolom pertemuan
+    const presentPerSession = sessions.map(s => {
+        let count = 0;
+        app.students.forEach(st => {
+            const rec = byKey.get(st.id + '|' + s.id);
+            if (rec && String(rec.status) === '1') {
+                count++;
+            }
+        });
+        return count;
+    });
+
+    // [BILLING CYCLE] Baris header pengelompokan per siklus (hanya jika ada data periode & >1 kelompok)
+    const hasPeriods = app.periods.length > 0;
+    const groups = buildPeriodGroups(sessions);
+    const groupRow = (hasPeriods && groups.length > 1)
+        ? `<tr class="rk-cycle-group">
+            <th class="rk-sticky rk-col-no"></th>
+            <th class="rk-sticky rk-col-name"></th>
+            <th class="rk-sticky rk-col-grade"></th>
+            ${groups.map(g => `<th class="rk-cycle-cell" colspan="${Math.max(g.count, 1)}">${escapeHtml(g.label)}</th>`).join('')}
+        </tr>`
+        : '';
+
+    const thead = `<thead>${groupRow}<tr>
+        <th class="rk-sticky rk-col-no" width="40">No</th>
+        <th class="rk-sticky rk-col-name rk-left">Nama Siswa</th>
+        <th class="rk-sticky rk-col-grade rk-left">Grade</th>
+        ${sessions.map((s, idx) =>
+            `<th class="rk-session-header" title="${escapeHtml(fmtDateLong(s.tanggal))} • ${escapeHtml(s.judul)}">
+                <span class="rk-session-num">Sesi ${idx + 1}</span>
+                <span class="rk-session-date">${escapeHtml(fmtDate(s.tanggal))}</span>
+            </th>`
+        ).join('')}
+    </tr></thead>`;
+
+    const tbody = `<tbody>` + app.students.map((st, i) => {
+        const cells = sessions.map(s => {
+            const rec = byKey.get(st.id + '|' + s.id);
+            return `<td class="rk-center">${ikonAbsensi(rec?.status)}</td>`;
+        }).join('');
+        return `<tr>
+            <td class="rk-sticky rk-col-no">${i + 1}</td>
+            <td class="rk-sticky rk-col-name rk-left">${escapeHtml(st.name)}</td>
+            <td class="rk-sticky rk-col-grade rk-left">${escapeHtml(st.grade || '-')}</td>
+            ${cells}
+        </tr>`;
+    }).join('') + `</tbody>`;
+
+    // [BARIS TOTAL SISWA HADIR DI FOOTER]
+    const tfoot = `<tfoot>
+        <tr class="rk-foot-total">
+            <td class="rk-sticky rk-col-no"><i class="fa-solid fa-check-double"></i></td>
+            <td class="rk-sticky rk-col-name rk-left"><strong>Total Hadir (✅)</strong></td>
+            <td class="rk-sticky rk-col-grade rk-left"><strong>${totalStudents} Siswa</strong></td>
+            ${presentPerSession.map(hadir => {
+                const pct = totalStudents > 0 ? Math.round((hadir / totalStudents) * 100) : 0;
+                return `<td class="rk-center rk-cell-total">
+                    <div class="rk-total-val">${hadir}</div>
+                    <div class="rk-total-pct">${pct}%</div>
+                </td>`;
+            }).join('')}
+        </tr>
+    </tfoot>`;
+
+    table.innerHTML = thead + tbody + tfoot;
 }
 
 // ---------------------------------------------------------------
