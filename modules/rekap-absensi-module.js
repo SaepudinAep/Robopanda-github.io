@@ -207,10 +207,14 @@ export async function init(canvas, opts = {}) {
 
             <!-- Bagian Tabel Laporan (Hanya Absensi & Materi) -->
             <section class="rk-section" id="rk-section-absensi" style="display:none;">
-                <div id="rk-wrap-absensi" class="rk-table-wrapper"></div>
+                <div id="rk-wrap-absensi" class="rk-table-wrapper">
+                    <table class="rk-table" id="rk-table-absensi"></table>
+                </div>
             </section>
             <section class="rk-section" id="rk-section-materi" style="display:none;">
-                <div id="rk-wrap-materi" class="rk-table-wrapper"></div>
+                <div id="rk-wrap-materi" class="rk-table-wrapper">
+                    <table class="rk-table" id="rk-table-materi"></table>
+                </div>
             </section>
         </div>`;
 
