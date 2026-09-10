@@ -420,7 +420,13 @@ async function isiDropdownKelasStudent() {
     } else {
         // [GROUP MODE] Student private -> resolve group milik kelasnya, laporan gabung per group
         const { data } = await supabase.from('class_private')
-            .select('id, name, level, group_id, group_private:group_id(owner, code)').eq('id', cid).maybeSingle();
+            .select('id, name, level, group_id, is_active, group_private:group_id(owner, code)').eq('id', cid).maybeSingle();
+        if (data && data.is_active === false) {
+            // [HIDE] Kelas tidak aktif -> jangan tampil laporan group (privasi + konsistensi)
+            selClass.innerHTML = '<option value="" disabled selected>Kelas Anda tidak aktif</option>';
+            hideReport();
+            return;
+        }
         if (data) opt = {
             id: data.group_id || data.id,
             name: data.group_private?.code || data.group_private?.owner || data.name || '',
@@ -593,7 +599,8 @@ async function fetchPrivateData() {
     const { data: clsList, error: eCls } = await supabase
         .from('class_private')
         .select('id, name')
-        .eq('group_id', gid);
+        .eq('group_id', gid)
+        .eq('is_active', true);   // [HIDE] Sembunyikan kelas tidak aktif
     if (eCls) { alert('Gagal memuat kelas private: ' + eCls.message); return false; }
 
     const classIds = (clsList || []).map(c => c.id);
@@ -825,11 +832,12 @@ async function buildGlobalPeriodAllocation() {
     if (!gid || !app.periods.length) return;
 
     try {
-        // Semua kelas di group (untuk gabungan global kuota)
+        // Kelas AKTIF saja di group (untuk gabungan global kuota) — kelas tidak aktif disembunyikan
         const { data: groupClasses } = await supabase
             .from('class_private')
             .select('id, name')
-            .eq('group_id', gid);
+            .eq('group_id', gid)
+            .eq('is_active', true);
         const classIds = (groupClasses || []).map(c => c.id);
         if (!classIds.length) return;
 
