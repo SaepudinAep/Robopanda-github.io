@@ -26,7 +26,7 @@ const STATIC_MENUS = [
 
 // Versi rilis statis untuk cache-busting modul.
 // Ganti angka ini HANYA saat rilis update agar browser bisa cache modul antar kunjungan.
-const APP_VERSION = '8.1';
+const APP_VERSION = '8.2';
 
 // --- 3. INISIALISASI ---
 document.addEventListener('DOMContentLoaded', async () => {

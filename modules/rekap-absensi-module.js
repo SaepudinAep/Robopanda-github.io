@@ -1,7 +1,7 @@
 /**
  * Project: Robopanda Client (Public/Student)
  * File: modules/rekap-absensi-module.js
- * Version: 2.4 - Alokasi siklus private berbasis model Billing global grup (Regula + carry + status kuota)
+ * Version: 2.5 - Private = gabungan per GROUP (semua kelas group digabungan)
  *
  * Description:
  *  Laporan absensi & materi/silabus terajarkan per kelas, mengikuti
@@ -54,7 +54,8 @@ let app = {
     periodMap: {},          // pertemuan_id -> index di app.periods; -1 = tidak berperiode
     periodFilter: null,     // null = 'Semua'; index periode / -1 = filter siklus aktif
     periodAlloc: {},        // [private] pertemuan_id -> { periodIdx } alokasi global grup
-    periodAllocDone: false  // [private] alokasi global grup siap
+    periodAllocDone: false, // [private] alokasi global grup siap
+    privateClassMap: new Map() // [private] student_id -> className (gabungan per GROUP)
 };
 
 // ---------------------------------------------------------------
@@ -95,6 +96,14 @@ function updateFilterVisibility() {
     const cf = document.getElementById('rk-class-field');
     if (pf) pf.style.display = (app.activeCtx === 'private' || isStudent) ? 'none' : '';
     if (cf) cf.style.display = isStudent ? 'none' : '';
+
+    // Label dinamik: Private = per GROUP (gabungan), Sekolah = per Kelas
+    const label = document.querySelector('#rk-class-field label');
+    if (label) {
+        label.innerHTML = (app.activeCtx === 'private')
+            ? '<i class="fa-solid fa-users"></i> Pilih Group'
+            : '<i class="fa-solid fa-chalkboard-user"></i> Pilih Kelas';
+    }
 }
 
 async function switchContext(ctx) {
@@ -135,6 +144,7 @@ export async function init(canvas, opts = {}) {
     app.periodFilter = null;
     app.periodAlloc = {};
     app.periodAllocDone = false;
+    app.privateClassMap = new Map();
 
     // [MAPPING GALLERY] Konteks awal persis seperti Gallery Module:
     // - privileged (super_admin/teacher/pic) -> selalu 'school'
@@ -346,34 +356,39 @@ async function isiDropdownKelas() {
     hideReport();
 }
 
+// [GROUP MODE] Konteks Private = gabungan per GROUP (jangan per kelas).
+// List hanya group yang masih punya minimal satu KELAS AKTIF (mirip Billing).
 async function isiDropdownKelasPrivate() {
     const selClass = document.getElementById('rk-class');
-    selClass.innerHTML = '<option value="" disabled selected>Memuat daftar kelas...</option>';
+    selClass.innerHTML = '<option value="" disabled selected>Memuat daftar group...</option>';
 
-    let query = supabase
-        .from('class_private')
-        .select('id, name, level, group_id, group_private:group_id(owner, code)')
-        .order('name');
+    const [rGroups, rClasses] = await Promise.all([
+        supabase.from('group_private').select('id, code, owner').order('owner'),
+        supabase.from('class_private').select('group_id, is_active')
+    ]);
+    if (rGroups.error) return alert('Gagal memuat group private: ' + rGroups.error.message);
+    if (rClasses.error) return alert('Gagal memuat kelas private: ' + rClasses.error.message);
 
-    // PIC hanya melihat kelas private dari group-nya sendiri
+    const withActiveClass = new Set(
+        (rClasses.data || []).filter(c => c.is_active).map(c => c.group_id)
+    );
+    let groups = (rGroups.data || []).filter(g => withActiveClass.has(g.id));
+
+    // PIC hanya melihat group milik sendiri (guard keamanan)
     if (app.userProfile.role === 'pic' && app.userProfile.group_id) {
-        query = query.eq('group_id', app.userProfile.group_id);
+        groups = groups.filter(g => g.id === app.userProfile.group_id);
     }
 
-    const { data, error } = await query;
-    if (error) return alert('Gagal memuat kelas private: ' + error.message);
-
-    if (!data || data.length === 0) {
-        selClass.innerHTML = '<option value="" disabled selected>Tidak ada kelas private</option>';
+    if (!groups.length) {
+        selClass.innerHTML = '<option value="" disabled selected>Tidak ada group dengan kelas aktif</option>';
         hideReport();
         return;
     }
 
-    // Label: nama kelas + nama owner group (orang tua/peserta) bila tersedia
-    selClass.innerHTML = '<option value="" disabled selected>-- Pilih Kelas --</option>' +
-        data.map(c =>
-            `<option value="${c.id}" data-name="${escapeHtml(c.name || '')}" data-jadwal="" data-level="${escapeHtml(c.level || '')}" data-school="${escapeHtml(c.group_private?.owner || '')}" data-group="${escapeHtml(c.group_id || '')}">
-                ${escapeHtml(c.name || '(tanpa nama)')}${c.group_private?.owner ? ' (' + escapeHtml(c.group_private.owner) + ')' : ''}
+    selClass.innerHTML = '<option value="" disabled selected>-- Pilih Group --</option>' +
+        groups.map(g =>
+            `<option value="${g.id}" data-name="${escapeHtml(g.code || g.owner || 'Group')}" data-jadwal="" data-level="" data-school="${escapeHtml(g.owner || '')}" data-group="${escapeHtml(g.id)}">
+                ${escapeHtml(g.code || g.owner || 'Group')}${g.owner ? ' (' + escapeHtml(g.owner) + ')' : ''}
             </option>`
         ).join('');
 
@@ -403,13 +418,17 @@ async function isiDropdownKelasStudent() {
             label: `${data.name || '(tanpa nama)'}${data.schools?.name ? ' (' + data.schools.name + ')' : ''}`
         };
     } else {
+        // [GROUP MODE] Student private -> resolve group milik kelasnya, laporan gabung per group
         const { data } = await supabase.from('class_private')
             .select('id, name, level, group_id, group_private:group_id(owner, code)').eq('id', cid).maybeSingle();
         if (data) opt = {
-            id: data.id, name: data.name || '', jadwal: '',
-            level: data.level || '', school: data.group_private?.owner || '',
+            id: data.group_id || data.id,
+            name: data.group_private?.code || data.group_private?.owner || data.name || '',
+            jadwal: '',
+            level: data.level || '',
+            school: data.group_private?.owner || '',
             group_id: data.group_id || '',
-            label: `${data.name || '(tanpa nama)'}${data.group_private?.owner ? ' (' + data.group_private.owner + ')' : ''}`
+            label: `${data.group_private?.code || data.group_private?.owner || data.name || '(tanpa nama)'}`
         };
     }
 
@@ -473,7 +492,7 @@ async function handleLoadRekap() {
         jadwal: opt.dataset.jadwal || '',
         level: opt.dataset.level || '',
         schoolName: opt.dataset.school || '',
-        group_id: opt.dataset.group || ''
+        group_id: opt.dataset.group || (app.activeCtx === 'private' ? cls : '')   // Private: id = group_id
     };
     app.periodFilter = null;
     app.periodAlloc = {};
@@ -507,6 +526,13 @@ async function loadClassData() {
         String(a.grade || '').localeCompare(String(b.grade || '')) ||
         String(a.name).localeCompare(String(b.name))
     );
+
+    // [GROUP MODE] Private: siswa yang dimerge dari absensi (non-aktif) juga dapat class tag
+    if (app.activeCtx === 'private' && app.privateClassMap) {
+        app.students.forEach(s => {
+            s.className = s.className || app.privateClassMap.get(s.id) || '';
+        });
+    }
 
     // [URUTAN TANGGAL] Wajib terbaru dulu (descending).
     // Dijamin ulang di sisi client agar konsisten apapun hasil ordering DB.
@@ -558,39 +584,76 @@ async function fetchSchoolData() {
 //   tidak ada baris      -> Belum Dinilai (null)
 // (Alpa tidak pernah muncul di mode private karena tidak ada field statusnya.)
 async function fetchPrivateData() {
-    // [FIX 2026-09-10] Query attendance_private TANPA embed join.
-    // Live DB sebelumnya punya FK name yang tidak konsisten (duplikat / di-rename)
-    // sehingga PostgREST gagal: "more than one relationship" lalu setelah diberi hint
-    // nama constraint: "Could not find a relationship". Solusi robust: tarik semua
-    // baris lama 'attendance_private' lalu disaring manual per kelas lewat
-    // pertemuan_id yang sudah dimuat dari pada pertemuan_private.
+    // [GROUP MODE] Private = gabungan PER GROUP: semua kelas dalam group digabungan,
+    // lalu siswa & sesi diambil lewat .in('class_id', classIds).
+    // Attendance_private tetap ditarik TANPA embed (aman FK duplikat live DB),
+    // kemudian disaring manual via pertemuan_id yang sudah dimuat.
+    const gid = app.activeClass.group_id || app.activeClass.id;
+
+    const { data: clsList, error: eCls } = await supabase
+        .from('class_private')
+        .select('id, name')
+        .eq('group_id', gid);
+    if (eCls) { alert('Gagal memuat kelas private: ' + eCls.message); return false; }
+
+    const classIds = (clsList || []).map(c => c.id);
+    if (!classIds.length) {
+        app.students = [];
+        app.pertemuanList = [];
+        app.attendance = [];
+        app.privateClassMap = new Map();
+        return true;
+    }
+    const classMap = new Map((clsList || []).map(c => [c.id, c.name || 'Kelas Private']));
+
     const [rStudents, rPert, rAtt] = await Promise.all([
-        supabase.from('students_private').select('id, name, is_active').eq('class_id', app.activeClass.id).order('name'),
-        supabase.from('pertemuan_private').select('id, tanggal, pertemuan_ke, materi_private:materi_id(judul, deskripsi, detail)').eq('class_id', app.activeClass.id).order('tanggal', { ascending: false }),
-        supabase.from('attendance_private').select('id, student_id, pertemuan_id, sikap, fokus, pemahaman, detail')
+        supabase.from('students_private')
+            .select('id, name, class_id, is_active')
+            .in('class_id', classIds)
+            .order('name'),
+        supabase.from('pertemuan_private')
+            .select('id, class_id, tanggal, pertemuan_ke, materi_private:materi_id(judul, deskripsi, detail)')
+            .in('class_id', classIds)
+            .order('tanggal', { ascending: false }),
+        supabase.from('attendance_private')
+            .select('id, student_id, pertemuan_id, sikap, fokus, pemahaman, detail')
     ]);
 
     if (rStudents.error) { alert('Gagal memuat siswa: ' + rStudents.error.message); return false; }
     if (rPert.error) { alert('Gagal memuat pertemuan: ' + rPert.error.message); return false; }
     if (rAtt.error) { alert('Gagal memuat absensi: ' + rAtt.error.message); return false; }
 
-    // Siswa private tidak punya kolom grade
+    // Siswa private tidak punya kolom grade; label kelas (gabungan per group)
     app.students = (rStudents.data || [])
         .filter(s => s.is_active !== false)
-        .map(s => ({ id: s.id, name: s.name || '', grade: '' }));
+        .map(s => ({
+            id: s.id,
+            name: s.name || '',
+            grade: '',
+            class_id: s.class_id,
+            className: classMap.get(s.class_id) || ''
+        }));
     app.pertemuanList = (rPert.data || []).map(p => ({
         id: p.id,
         tanggal: p.tanggal,
         judul: p.materi_private?.judul || '(tanpa judul)',
-        uraian: (p.materi_private?.deskripsi || p.materi_private?.detail || '').trim()
+        uraian: (p.materi_private?.deskripsi || p.materi_private?.detail || '').trim(),
+        classId: p.class_id,
+        className: classMap.get(p.class_id) || ''
     }));
 
-    // Map id->nama (termasuk siswa non-aktif) untuk mengisi nama saat penggabungan
+    // Map student_id -> nama & className (termasuk siswa non-aktif) untuk penggabungan
     const pertemuanIds = new Set(app.pertemuanList.map(p => p.id));
     const studentNameById = new Map();
-    (rStudents.data || []).forEach(s => { if (s?.name) studentNameById.set(s.id, s.name); });
+    const studentClassById = new Map();
+    app.privateClassMap = new Map();
+    (rStudents.data || []).forEach(s => {
+        if (s?.name) studentNameById.set(s.id, s.name);
+        studentClassById.set(s.id, classMap.get(s.class_id) || '');
+        app.privateClassMap.set(s.id, classMap.get(s.class_id) || '');
+    });
 
-    // Filter manual ke kelas aktif (karena tidak ada kolom class di attendance_private)
+    // Filter manual ke sesi group (karena tidak ada kolom class di attendance_private)
     app.attendance = (rAtt.data || [])
         .filter(r => pertemuanIds.has(r.pertemuan_id))
         .map(r => ({
@@ -598,6 +661,7 @@ async function fetchPrivateData() {
             student_id: r.student_id,
             pertemuan_id: r.pertemuan_id,
             student: { id: r.student_id, name: studentNameById.get(r.student_id) || '' }, // untuk penggabungan siswa non-aktif
+            className: studentClassById.get(r.student_id) || '',
             status: (r.sikap != null || r.fokus != null || r.pemahaman != null || (r.detail && String(r.detail).trim())) ? '1' : null
         }));
     return true;
@@ -608,9 +672,10 @@ function fillReportHeader() {
     const semOpt = document.getElementById('rk-semester').selectedOptions[0];
 
     document.getElementById('rk-school').textContent = app.activeClass.schoolName ||
-        (app.activeCtx === 'private' ? 'Kelas Private' : 'Sekolah');
-    document.getElementById('rk-meta-class').textContent =
-        `Kelas ${app.activeClass.name}  ${app.activeClass.level ? '• Level: ' + app.activeClass.level : ''}  |  Jadwal: ${app.activeClass.jadwal || '-'}`;
+        (app.activeCtx === 'private' ? 'Program Private' : 'Sekolah');
+    document.getElementById('rk-meta-class').textContent = (app.activeCtx === 'private')
+        ? `Group ${app.activeClass.name}${app.activeClass.schoolName ? ' • Owner: ' + app.activeClass.schoolName : ''}`
+        : `Kelas ${app.activeClass.name}  ${app.activeClass.level ? '• Level: ' + app.activeClass.level : ''}  |  Jadwal: ${app.activeClass.jadwal || '-'}`;
     document.getElementById('rk-meta-year').textContent = (app.activeCtx === 'private')
         ? 'Program Private'
         : `${yearOpt ? yearOpt.textContent : ''} • ${semOpt ? semOpt.textContent : ''}`;
@@ -660,6 +725,7 @@ function hideReport() {
     app.periodFilter = null;
     app.periodAlloc = {};
     app.periodAllocDone = false;
+    app.privateClassMap = new Map();
     const pr = document.getElementById('rk-period-row');
     if (pr) pr.style.display = 'none';
 }
@@ -992,7 +1058,7 @@ function renderAbsensiWorksheet() {
         }).join('');
         return `<tr>
             <td class="rk-sticky rk-col-no">${i + 1}</td>
-            <td class="rk-sticky rk-col-name rk-left">${escapeHtml(st.name)}</td>
+            <td class="rk-sticky rk-col-name rk-left">${escapeHtml(st.name)}${app.activeCtx === 'private' && st.className ? `<span class="rk-class-tag">${escapeHtml(st.className)}</span>` : ''}</td>
             <td class="rk-sticky rk-col-grade rk-left">${escapeHtml(st.grade || '-')}</td>
             ${cells}
         </tr>`;
@@ -1044,7 +1110,7 @@ function renderMateriTable() {
             return `<tr>
                 <td class="rk-center"><strong>${sesiNo}</strong></td>
                 <td class="rk-left" style="white-space:nowrap;">${escapeHtml(fmtDateLong(r.tanggal))}</td>
-                <td class="rk-left"><strong>${escapeHtml(r.judul)}</strong></td>
+                <td class="rk-left"><strong>${escapeHtml(r.judul)}</strong>${app.activeCtx === 'private' && r.className ? `<span class="rk-class-tag">${escapeHtml(r.className)}</span>` : ''}</td>
                 <td class="rk-left">${escapeHtml(r.uraian) || '<em style="color:#94a3b8">Tidak ada uraian</em>'}</td>
             </tr>`;
         }).join('');
@@ -1259,6 +1325,7 @@ function injectStyles() {
         .rk-cycle-cell { white-space: nowrap; }
         .rk-cycle-hdr td { background: #ecfdf5; color: #047857; font-weight: 800; font-size: .75rem; text-align: left !important; letter-spacing: .03em; border-bottom: 2px solid #a7f3d0; padding: 7px 12px; }
         .rk-period-note { font-size: .68rem; color: #64748b; font-weight: 600; margin-left: 6px; }
+        .rk-class-tag { display:inline-block; margin-left:6px; background:#e0f2fe; color:#0e7490; border:1px solid #bae6fd; border-radius:12px; padding:1px 8px; font-size:.66rem; font-weight:700; white-space:nowrap; }
 
         @media (max-width: 720px) {
             .rk-control { flex-direction: column; align-items: stretch; }
