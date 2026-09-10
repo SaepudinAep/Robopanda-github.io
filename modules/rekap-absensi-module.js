@@ -1,7 +1,7 @@
 /**
  * Project: Robopanda Client (Public/Student)
  * File: modules/rekap-absensi-module.js
- * Version: 2.6 - Tab Absensi jadi tabel vertikal (No | Tanggal | Nama | Materi | Status)
+ * Version: 2.7 - Tab Absensi: kolom Sesi (nomor sesi) ganti Status
  *
  * Description:
  *  Laporan absensi & materi/silabus terajarkan per kelas, mengikuti
@@ -1060,6 +1060,10 @@ function renderAbsensiWorksheet() {
     });
     groups.forEach(g => { if (g.pi >= 0) g.label = periodLabel(g.pi, g.count); });
 
+    // Map pertemuan_id -> nomor sesi (urut tampilan: terbaru = Sesi 1)
+    const sesiByPertemuanId = new Map();
+    sessions.forEach((s, idx) => sesiByPertemuanId.set(s.id, idx + 1));
+
     let no = 0;
     let present = 0;
     const bodyRows = groups.map(g => {
@@ -1074,7 +1078,7 @@ function renderAbsensiWorksheet() {
                 <td class="rk-left" style="white-space:nowrap;">${escapeHtml(fmtDateLong(r.tanggal))}</td>
                 <td class="rk-left">${escapeHtml(r.studentName)}${app.activeCtx === 'private' && r.studentClassName ? `<span class="rk-class-tag">${escapeHtml(r.studentClassName)}</span>` : ''}</td>
                 <td class="rk-left">${escapeHtml(r.judul)}${app.activeCtx === 'private' && r.sessionClassName ? `<span class="rk-class-tag">${escapeHtml(r.sessionClassName)}</span>` : ''}</td>
-                <td class="rk-center">${ikonAbsensi(r.status)}</td>
+                <td class="rk-center"><strong>Sesi ${sesiByPertemuanId.get(r.pertemuan_id) ?? '—'}</strong></td>
             </tr>`;
         }).join('');
     }).join('');
@@ -1096,7 +1100,7 @@ function renderAbsensiWorksheet() {
         <th class="rk-left" width="150">Tanggal</th>
         <th class="rk-left">Nama</th>
         <th class="rk-left">Materi</th>
-        <th class="rk-center" width="90">Status</th>
+        <th class="rk-center" width="90">Sesi</th>
     </tr></thead><tbody>${bodyRows}</tbody>${tfoot}`;
 }
 
